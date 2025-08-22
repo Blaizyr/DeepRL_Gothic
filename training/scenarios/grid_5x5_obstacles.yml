@@ -1,0 +1,6 @@
+name: grid_5x5_obstacles
+env_class: GridEnvV2
+size: [5,5]
+obstacles: true
+max_steps: 50
+reward_shape: shaped

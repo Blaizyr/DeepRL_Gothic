@@ -1,0 +1,17 @@
+- name: grid_2x2
+  env_class: GridEnvV1
+  env_params:
+    size: [2,2]
+    max_steps: 10
+  agent: PPO
+  agent_params:
+    policy_kwargs: null
+- name: grid_5x5_obstacles
+  env_class: GridEnvV2
+  env_params:
+    size: [5,5]
+    obstacles: true
+    max_steps: 50
+  agent: PPO
+  agent_params:
+    policy_kwargs: null
