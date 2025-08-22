@@ -1,0 +1,28 @@
+- name: grid_2x2
+  env_class: GridEnvV1
+  env_params:
+    size: [2,2]
+    max_steps: 20
+  agent: PPO
+#  agent_params:
+#    timesteps: 0   # 0 bo tylko testujemy, nie trenujemy
+  test_episodes: 5
+  metrics:
+    - trajectory
+    - reward
+    - heatmap
+
+- name: grid_5x5_obstacles
+  env_class: GridEnvV2
+  env_params:
+    size: [5,5]
+    max_steps: 50
+    obstacles: true
+  agent: PPO
+#  agent_params:
+#    model_path: "../models/GridEnvV2_PPO.zip"
+  test_episodes: 3
+  metrics:
+    - trajectory
+    - reward
+    - heatmap
