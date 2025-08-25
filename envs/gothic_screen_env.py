@@ -6,8 +6,10 @@ import keyboard
 import pytesseract
 from gymnasium import spaces
 import numpy as np
+
+from utils.build_action_map import build_action_map
 from utils.window_capture import find_window_by_title_substring, grab_window
-from utils.input_control import send_action
+from utils.input_control import InputController
 from utils.vision import preprocess_rgb_to_obs
 from utils.text_targeting import detect_text_candidates, candidates_to_targets, ocr_on_candidate, TargetHistory
 
@@ -37,9 +39,13 @@ class GothicScreenEnv(gym.Env):
         self.prev_obs = None
         self.prev_enemy_hp = None
         self.prev_player_hp = None
+        self.prev_player_mana = None
+        self.prev_player_oxygen = None
         self.prev_weapon_equipped = False
+        self.weapon_equipped = False
         self.combat_started = False
         self.combat_timer = 0
+        self.player_in_danger = False
         self.steps = 0
         self.hwnd = None
 
@@ -47,7 +53,12 @@ class GothicScreenEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(frame_shape[0], frame_shape[1], 1), dtype=np.uint8
         )
-        self.action_space = spaces.Discrete(17)
+        self.action_map, self.action_groups = build_action_map()
+        self.input_controller = InputController(action_map=self.action_map, default_hold_ms=action_hold_ms)
+        print(f"mapa akcji: {self.action_map}")
+        print(f"grupy akcji: {self.action_groups}")
+
+        self.action_space = spaces.Discrete(len(self.action_map))
 
         # --- manual reward ---
         self.manual_reward = 0.0
@@ -96,12 +107,11 @@ class GothicScreenEnv(gym.Env):
 
     def step(self, action):
         action_id = int(action)
-        timing_info = send_action(action_id, hold_ms=self.action_hold_ms)
+        timing_info = self.input_controller.execute_action(action_id, hold_ms=self.action_hold_ms)
         time.sleep(0.05)
 
         raw_image = self._capture_obs()
         if raw_image is None or getattr(raw_image, "size", 0) == 0:
-            print("[WARN] Got empty frame in step(), skipping detection")
             return self.prev_obs.copy(), 0.0, False, False, {}
         obs = preprocess_rgb_to_obs(raw_image, out_size=self.frame_shape, crop=self.crop, gray=True)
 
@@ -123,10 +133,10 @@ class GothicScreenEnv(gym.Env):
             dx, dy = best.offset
 
             tau = 420.0
-            reward += 0.8 * np.exp(-abs(dx) / tau)
+            reward += 0.9 * np.exp(-abs(dx) / tau)
 
             if self.target_hist.stable_centered(dx_thresh=35, min_frames=5):
-                reward += 1.0
+                reward += 10.0
 
             info["target_name"] = best.text
             info["target_dx"] = dx
@@ -137,17 +147,18 @@ class GothicScreenEnv(gym.Env):
         # --- baseline ---
         diff = float(np.mean(np.abs(obs.astype(np.int16) - self.prev_obs.astype(np.int16))))
         if diff >= self.stagnation_threshold:
-            reward += 0.01
+            reward += 0.005
         else:
-            reward -= 0.005
+            reward -= 0.001
         info["frame_diff"] = diff
 
         # --- events ---
         enemy_hp, player_hp = detect_enemy_hp(raw_image), detect_player_hp(raw_image)
+        player_mana, player_oxygen = detect_player_mana(raw_image), detect_player_oxygen(raw_image)
         xp_gain = detect_xp_gain(raw_image) if self.steps % 10 == 0 else None
 
         if enemy_hp is not None and self.prev_enemy_hp is None:
-            reward += 0.25
+            reward += 25
             info["event"] = "enemy_detected"
 
         if enemy_hp is not None and self.prev_enemy_hp is not None:
@@ -155,18 +166,27 @@ class GothicScreenEnv(gym.Env):
                 if not self.combat_started:
                     self.combat_started = True
                     self.combat_timer = time.time()
-                reward += -0.1 * (time.time() - self.combat_timer)
+                reward += -0.5 * (time.time() - self.combat_timer)
                 info["event"] = "enemy_damaged"
 
         if player_hp is not None and self.prev_player_hp is not None:
             if player_hp < self.prev_player_hp:
                 reward -= 5.0
+                self.player_in_danger = True
+                self.player_in_danger_timer = time.time()
                 info["event"] = "player_damaged"
 
-        if player_hp is not None and player_hp <= 5:
-            reward -= 100.0
-            info["event"] = "player_dead"
-            terminated = True
+        if player_hp is not None:
+            if player_hp == 0:
+                reward -= 300.0
+                info["event"] = "player_dead"
+                terminated = True
+            elif 1 <= player_hp <= 2:
+                reward -= 100.0
+                info["event"] = "player_defeated"
+                terminated = True
+            else:
+                terminated = False
         else:
             terminated = False
 
@@ -178,8 +198,41 @@ class GothicScreenEnv(gym.Env):
             else:
                 info["pending_event"] = "enemy_maybe_killed"
 
+        if player_oxygen is not None:
+            if self.prev_player_oxygen is None:
+                reward -= 100.0
+                info["event"] = "player_under_water"
+
+            elif player_oxygen < self.prev_player_oxygen:
+                base_penalty = 10.0
+                severity_multiplier = 1.0 + 2.0 * (1.0 - player_oxygen)  # np. 1.0 do 3.0
+                reward -= base_penalty * severity_multiplier
+                info["event"] = "oxygen_decreasing"
+
+            if player_oxygen == 0:
+                self.player_is_drowning = True
+                reward -= 150.0
+                info["event"] = "player_drowning"
+                terminated = True
+
+            else:
+                self.player_is_drowning = False
+        else:
+            self.player_is_drowning = False
+            if self.prev_player_oxygen is not None:
+                reward += 50.0
+                info["event"] = "exited_water"
+
+        self.prev_player_oxygen = player_oxygen
+
+        if player_mana is not None:
+            self.weapon_equipped = "magic"
+            reward += 0.5
+            info["event"] = "player_got_some_magic"
+        # Co robić jak wykryje magię?
+
         # --- macros reward ---
-        if action_id in range(11, 16):
+        if action_id in self.action_groups['macro']:
             macro_reward = self.compute_macro_dexterity_reward(timing_info)
             reward += macro_reward
             info["timing_reward"] = macro_reward
@@ -189,7 +242,7 @@ class GothicScreenEnv(gym.Env):
                 if enemy_hp < self.prev_enemy_hp:
                     self.combat_timer = time.time()
             if time.time() - self.combat_timer > 10:
-                reward -= 5
+                reward -= 15
                 self.combat_started = False
                 info["event"] = "combat_timeout"
 
@@ -200,8 +253,10 @@ class GothicScreenEnv(gym.Env):
             self.manual_reward = 0.0
 
         # --- weapon change reward ---
-        if action_id in range(8, 10):
-            reward += 0.1
+        if action_id in self.action_groups['weapon']:
+            if self.combat_started:
+                reward -= 3
+            reward += 0.05
             info["exploration_bonus"] = "weapon_slot"
 
         # --- update ---
@@ -227,6 +282,7 @@ class GothicScreenEnv(gym.Env):
     def close(self):
         pass
 
+
 # --- Detections ---
 def detect_enemy_hp(obs):
     return detect_bar_value(obs, roi=(1685, 28, 2150, 70), channel="red")
@@ -238,6 +294,10 @@ def detect_player_hp(obs):
 
 def detect_player_mana(obs):
     return detect_bar_value(obs, roi=(3325, 2080, 3795, 2126), channel="blue")
+
+
+def detect_player_oxygen(obs):
+    return detect_bar_value(obs, roi=(1685, 2084, 2150, 2126), channel="blue")
 
 
 def detect_xp_gain(obs, roi=(1694, 1080, 2145, 1128)):
