@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import keyboard
 from stable_baselines3 import PPO
@@ -23,6 +24,9 @@ class PPOModelCNNPolicyTrainer:
         self.model_path = model_path
         self.env = DummyVecEnv([make_env])
         self.model, self.reset_flag = self._load_or_create_model()
+
+        keyboard.add_hotkey("F1", self.emergency_shutdown)
+        keyboard.add_hotkey("F4", self.hard_shutdown)
 
     def _load_or_create_model(self):
         if os.path.exists(self.model_path):
@@ -61,22 +65,21 @@ class PPOModelCNNPolicyTrainer:
         print("Naciśnij F1, aby zapisać i bezpiecznie zakończyć.")
         print("Naciśnij F4, aby przerwać sesję bez zapisu.")
 
-        keyboard.add_hotkey("F1", self.emergency_shutdown)
-        keyboard.add_hotkey("F4", self.hard_shutdown)
+        def learn_thread():
+            try:
+                self.model.learn(total_timesteps=200_000, reset_num_timesteps=self.reset_flag)
+            except Exception as e:
+                print(f"Wystąpił błąd podczas uczenia: {e}")
+            finally:
+                os.makedirs("models", exist_ok=True)
+                self.model.save(self.model_path)
+                print(f"Zapisano postęp: {self.model_path}")
+                self.env.close()
+                print("Środowisko zamknięte. Koniec działania programu.")
 
-        try:
-            self.model.learn(total_timesteps=200_000, reset_num_timesteps=self.reset_flag)
-            self.reset_flag = False
-        except Exception as e:
-            print(f"Wystąpił błąd podczas uczenia: {e}")
-        finally:
-            os.makedirs("models", exist_ok=True)
-            self.model.save(self.model_path)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            print(f"Zapisano postęp: {self.model_path} - {timestamp}")
-            print("Zamykanie środowiska...")
-            self.env.close()
-            print("Środowisko zamknięte. Koniec działania programu.")
+        t = threading.Thread(target=learn_thread, daemon=True)
+        t.start()
+        t.join()
 
 
 if __name__ == "__main__":
