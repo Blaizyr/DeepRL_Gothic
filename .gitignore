@@ -30,6 +30,8 @@ CMakeFiles/
 *.idb
 *.ilk
 
+CMakeSettings.json
+
 # Python
 __pycache__/
 *.pyc
