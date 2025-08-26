@@ -5,32 +5,14 @@ from datetime import datetime
 
 import numpy as np
 import keyboard
-from utils.window_capture import find_window_by_title_substring, grab_window
-from utils.vision import preprocess_rgb_to_obs
 
-action_map = {
-    0: None,
-    1: "up",
-    2: "down",
-    3: "left",
-    4: "right",
-    5: "ctrl",
-    6: "alt",
-    7: "1",
-    8: "2",
-    9: "3",
-    10: ('macro', 'ctrl', 'right', 100),
-    11: ('macro', 'ctrl', 'left', 100),
-    12: ('macro', 'ctrl', 'up', 100),
-    13: ('macro', 'ctrl', 'down', 100),
-    14: ('macro', 'alt', 'up', 100),
-    15: ('macro', 'up', 'alt', 300),
-    16: ('macro', 'up', 'num 0', 300)
-}
+from utils.build_action_map import build_action_map
+from utils.screen_capture import ScreenCapture
 
 def main():
     os.makedirs("artifacts", exist_ok=True)
-    hwnd = find_window_by_title_substring("Gothic")
+    screen_capture = ScreenCapture(window_title_substr="Gothic")
+    hwnd = screen_capture.hwnd
     if hwnd is None:
         print("Nie znaleziono okna Gothic.")
         return
@@ -41,12 +23,11 @@ def main():
     print("Start za 3s… ustaw focus na Gothic.")
     time.sleep(8)
 
+    action_map, _ = build_action_map()
+
     try:
         while True:
-            img = grab_window(hwnd)
-            if img is None:
-                continue
-            obs = preprocess_rgb_to_obs(img, out_size=(84,84), gray=False)
+            obs = screen_capture.get_observation(preprocess = True)
             action_id = 0
             for k, aid in action_map.items():
                 if keyboard.is_pressed(k):
@@ -55,10 +36,6 @@ def main():
             frames.append(obs)
             actions.append(action_id)
 
-            # ESC ends recording
-            # if keyboard.is_pressed('esc'):
-
-            # F1 ends recording
             if keyboard.is_pressed('F1'):
                 break
 

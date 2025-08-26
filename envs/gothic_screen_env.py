@@ -8,10 +8,9 @@ from gymnasium import spaces
 import numpy as np
 
 from utils.build_action_map import build_action_map
-from utils.window_capture import find_window_by_title_substring, grab_window
 from utils.input_control import InputController
-from utils.vision import preprocess_rgb_to_obs
 from utils.text_targeting import detect_text_candidates, candidates_to_targets, ocr_on_candidate, TargetHistory
+from utils.screen_capture import ScreenCapture
 
 
 class GothicScreenEnv(gym.Env):
@@ -35,8 +34,12 @@ class GothicScreenEnv(gym.Env):
         self.target_hist = TargetHistory(maxlen=15)
         self.debug_draw_text = False
 
+        self.screen_capture = ScreenCapture(
+            window_title_substr=self.window_title_substr,
+            frame_shape=self.frame_shape,
+        )
+
         # --- state ---
-        self.prev_obs = None
         self.prev_enemy_hp = None
         self.prev_player_hp = None
         self.prev_player_mana = None
@@ -47,7 +50,6 @@ class GothicScreenEnv(gym.Env):
         self.combat_timer = 0
         self.player_in_danger = False
         self.steps = 0
-        self.hwnd = None
 
         # --- spaces ---
         self.observation_space = spaces.Box(
@@ -85,45 +87,31 @@ class GothicScreenEnv(gym.Env):
         keyboard.add_hotkey("=", reward_plus)  ######### +5
         keyboard.add_hotkey("\\", reward_large_plus)  ## +25
 
-    def _capture_obs(self):
-        if self.hwnd is None:
-            self.hwnd = find_window_by_title_substring(self.window_title_substr)
-            if self.hwnd is None:
-                return None
-        img = grab_window(self.hwnd, bbox=None)
-        if img is None or getattr(img, "size", 0) == 0:
-            print("[ERROR] grab_window failed or empty frame")
-            return None
-        return img
-
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         time.sleep(0.2)
-        self.prev_obs = self._capture_obs()
         self.steps = 0
-        if self.prev_obs is None:
-            self.prev_obs = np.zeros((*self.frame_shape, 1), dtype=np.uint8)
-        return self.prev_obs, {}
+        obs = self.screen_capture.get_observation(preprocess=True)
+        self.steps = 0
+        return obs, {}
 
     def step(self, action):
         action_id = int(action)
         timing_info = self.input_controller.execute_action(action_id, hold_ms=self.action_hold_ms)
         time.sleep(0.05)
 
-        raw_image = self._capture_obs()
-        if raw_image is None or getattr(raw_image, "size", 0) == 0:
-            return self.prev_obs.copy(), 0.0, False, False, {}
-        obs = preprocess_rgb_to_obs(raw_image, out_size=self.frame_shape, crop=self.crop, gray=True)
+        raw_obs = self.screen_capture.get_observation(preprocess=False)
+        obs = self.screen_capture.get_observation(preprocess=True)
 
         reward = 0.0
         info = {}
 
-        targets_boxes = detect_text_candidates(raw_image, limit=25)
-        targets = candidates_to_targets(raw_image, targets_boxes)
+        targets_boxes = detect_text_candidates(obs, limit=25)
+        targets = candidates_to_targets(raw_obs, targets_boxes)
 
         best = None
         for cand in targets[:6]:
-            cand = ocr_on_candidate(raw_image, cand, refine=True)
+            cand = ocr_on_candidate(raw_obs, cand, refine=True)
             if cand.text and cand.conf and cand.conf >= 40:
                 best = cand
                 break
@@ -153,9 +141,9 @@ class GothicScreenEnv(gym.Env):
         info["frame_diff"] = diff
 
         # --- events ---
-        enemy_hp, player_hp = detect_enemy_hp(raw_image), detect_player_hp(raw_image)
-        player_mana, player_oxygen = detect_player_mana(raw_image), detect_player_oxygen(raw_image)
-        xp_gain = detect_xp_gain(raw_image) if self.steps % 10 == 0 else None
+        enemy_hp, player_hp = detect_enemy_hp(raw_obs), detect_player_hp(raw_obs)
+        player_mana, player_oxygen = detect_player_mana(raw_obs), detect_player_oxygen(raw_obs)
+        xp_gain = detect_xp_gain(raw_obs) if self.steps % 10 == 0 else None
 
         if enemy_hp is not None and self.prev_enemy_hp is None:
             reward += 25
@@ -260,7 +248,6 @@ class GothicScreenEnv(gym.Env):
             info["exploration_bonus"] = "weapon_slot"
 
         # --- update ---
-        self.prev_obs = obs
         self.prev_enemy_hp = enemy_hp
         self.prev_player_hp = player_hp
         self.steps += 1
