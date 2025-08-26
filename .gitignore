@@ -1,1 +1,43 @@
-/.idea/
+# JetBrains (PyCharm, IDEA, AS, etc.)
+.idea/
+*/.idea/
+*.iml
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.opendb
+*.VC.db
+
+# Build dirs
+x64/
+x86/
+Debug/
+Release/
+[Cc]MakeCache.txt
+CMakeFiles/
+
+# Output binaries
+*.dll
+*.lib
+*.exp
+*.pdb
+
+# Other VS stuff
+*.ipch
+*.obj
+*.idb
+*.ilk
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.venv/
+venv/
+dist/
+build/
