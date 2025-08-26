@@ -59,7 +59,7 @@ def build_action_map():
 
     # === 7. Długie trzymanie klawiszy (hold) ===
     aid = next(action_id)
-    action_map[aid] = ('hold', 'up', 2500)
+    action_map[aid] = ('hold', 'up', 500)
     action_groups['hold'].append(aid)
 
     # === 8. Strzelanie z łuku ===

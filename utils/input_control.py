@@ -1,5 +1,4 @@
 # utils/input_control.py
-import random
 import time
 import pydirectinput as pdi
 
@@ -27,11 +26,11 @@ class InputController:
             if action_type == 'jump':
                 a_type, k1, k2, a_time_ms = action
                 pdi.keyDown(k1)
-                time.sleep(a_time_ms)
+                self.timed_action(a_time_ms)
                 pdi.keyDown(k2)
                 time.sleep(0.02)
                 pdi.keyUp(k2)
-                time.sleep(max(0, a_time_ms))
+                self.timed_action(a_time_ms)
                 pdi.keyUp(k1)
                 timing_info.update({'type': 'jump', 'keys': (k1, k2)})
 
@@ -42,7 +41,7 @@ class InputController:
                 pdi.keyDown(key)
                 time.sleep(0.02)
                 pdi.keyUp(key)
-                time.sleep(random.randrange(0, a_time_ms / 1000.0 - 0.04))
+                self.timed_action(a_time_ms)
                 pdi.keyUp(mod)
                 timing_info.update({'type': 'macro', 'keys': (mod, key)})
 
@@ -51,7 +50,7 @@ class InputController:
                 pdi.keyDown(k1)
                 time.sleep(0.02)
                 pdi.keyDown(k2)
-                time.sleep(a_time_ms / 1000.0)
+                self.timed_action(a_time_ms)
                 pdi.keyUp(k2)
                 time.sleep(0.02)
                 pdi.keyUp(k1)
@@ -59,19 +58,17 @@ class InputController:
 
             elif action_type == 'hold':
                 a_type, key, a_time_ms = action
-                actual_hold = random.randrange(hold_ms, a_time_ms) / 1000.0
                 pdi.keyDown(key)
-                time.sleep(actual_hold)
+                self.timed_action(a_time_ms)
                 pdi.keyUp(key)
                 timing_info.update({'type': 'hold', 'key': key})
 
             elif action_type == 'bow_shooting':
                 a_type, aim, shoot, a_time_ms = action
-                actual_hold = random.randrange(1, a_time_ms / 1000.0)
                 pdi.keyDown(aim)
                 time.sleep(0.02)
                 pdi.keyDown(shoot)
-                time.sleep(actual_hold)
+                self.timed_action(a_time_ms)
                 pdi.keyUp(shoot)
                 time.sleep(0.02)
                 pdi.keyUp(aim)
@@ -89,3 +86,16 @@ class InputController:
 
         timing_info['duration'] = time.time() - start
         return timing_info
+
+    def timed_action(duration_ms: int, step_ms: int = 10, callback=None):
+
+        start = time.time()
+        end_time = start + duration_ms / 1000.0
+
+        while time.time() < end_time:
+            # if _stop_flag:
+            #     break
+            if callback:
+                callback()
+            time.sleep(step_ms / 1000.0)
+
